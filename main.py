@@ -1,11 +1,10 @@
 import os
-import re
 import logging
 from datetime import datetime
 from collections import defaultdict
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import psycopg
+from psycopg.rows import dict_row
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application,
@@ -32,7 +31,7 @@ if not DATABASE_URL:
 
 
 def get_conn():
-    return psycopg2.connect(DATABASE_URL, sslmode="require")
+    return psycopg.connect(DATABASE_URL, sslmode="require")
 
 
 def init_db():
@@ -196,13 +195,11 @@ def start_keyboard():
     )
 
 
-def selection_keyboard(rows, iso_date, manager_contact):
+def selection_keyboard(rows, iso_date):
     keyboard = []
     for row in rows:
         label = f"{row['name']} | {row['shift']} | {row['page_type']}"
-        callback = f"select:{row['user_id']}:{iso_date}:{manager_contact}"
-        if len(callback) > 64:
-            callback = f"select:{row['user_id']}:{iso_date}"
+        callback = f"select:{row['user_id']}:{iso_date}"
         keyboard.append([InlineKeyboardButton(label[:60], callback_data=callback)])
     return InlineKeyboardMarkup(keyboard)
 
@@ -353,7 +350,7 @@ async def myavailability_command(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     conn = get_conn()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur = conn.cursor(row_factory=dict_row)
     cur.execute(
         """
         SELECT available_date, shift, page_type
@@ -422,7 +419,7 @@ async def remove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def fetch_chatters_by_date(date_iso: str, shift=None):
     conn = get_conn()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur = conn.cursor(row_factory=dict_row)
 
     if shift:
         cur.execute(
@@ -460,7 +457,7 @@ async def fetch_chatters_by_date(date_iso: str, shift=None):
 
 async def fetch_all_chatters():
     conn = get_conn()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur = conn.cursor(row_factory=dict_row)
     cur.execute(
         """
         SELECT user_id, private_chat_id, name, telegram, available_date, shift, page_type
@@ -500,13 +497,11 @@ async def send_shift_list(message, manager_user, date_obj, shift_name: str):
     for row in rows:
         lines.append(f"• {row['name']} — {row['telegram'] or '(no @username)'} — {row['page_type']}")
 
-    manager_contact = get_manager_contact(manager_user)
-
     await reply_in_same_topic(message, "\n".join(lines))
     await reply_in_same_topic(
         message,
         "Select a chatter to notify:",
-        reply_markup=selection_keyboard(rows, date_obj.isoformat(), manager_contact),
+        reply_markup=selection_keyboard(rows, date_obj.isoformat()),
     )
 
 
@@ -543,13 +538,11 @@ async def send_all_for_one_date(message, manager_user, date_obj):
         parts.extend(grouped["Closing"])
         parts.append("")
 
-    manager_contact = get_manager_contact(manager_user)
-
     await reply_in_same_topic(message, "\n".join(parts).strip())
     await reply_in_same_topic(
         message,
         "Select a chatter to notify:",
-        reply_markup=selection_keyboard(rows, date_obj.isoformat(), manager_contact),
+        reply_markup=selection_keyboard(rows, date_obj.isoformat()),
     )
 
 
@@ -759,14 +752,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         parts = data.split(":")
-        if len(parts) >= 4:
-            _, user_id, date_str, manager_contact = parts[0], parts[1], parts[2], ":".join(parts[3:])
-        else:
-            _, user_id, date_str = parts
-            manager_contact = get_manager_contact(query.from_user)
+        if len(parts) < 3:
+            await query.message.reply_text(
+                "Invalid selection data.",
+                message_thread_id=topic_id,
+            )
+            return
+
+        _, user_id, date_str = parts[:3]
+        manager_contact = get_manager_contact(query.from_user)
 
         conn = get_conn()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur = conn.cursor(row_factory=dict_row)
         cur.execute(
             """
             SELECT user_id, private_chat_id, name, telegram, shift, page_type, available_date
