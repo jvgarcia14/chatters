@@ -41,6 +41,7 @@ def init_db():
     conn = get_conn()
     cur = conn.cursor()
 
+    # Base tables
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS availability (
@@ -92,6 +93,24 @@ def init_db():
         """
     )
 
+    # Migrations for older databases
+    cur.execute("ALTER TABLE availability ADD COLUMN IF NOT EXISTS private_chat_id BIGINT;")
+    cur.execute("ALTER TABLE availability ADD COLUMN IF NOT EXISTS name TEXT;")
+    cur.execute("ALTER TABLE availability ADD COLUMN IF NOT EXISTS telegram TEXT;")
+    cur.execute("ALTER TABLE availability ADD COLUMN IF NOT EXISTS available_date DATE;")
+    cur.execute("ALTER TABLE availability ADD COLUMN IF NOT EXISTS shift TEXT;")
+    cur.execute("ALTER TABLE availability ADD COLUMN IF NOT EXISTS page_type TEXT;")
+    cur.execute("ALTER TABLE availability ADD COLUMN IF NOT EXISTS preferred_page TEXT;")
+    cur.execute("ALTER TABLE availability ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'available';")
+    cur.execute("ALTER TABLE availability ADD COLUMN IF NOT EXISTS booked_by BIGINT;")
+    cur.execute("ALTER TABLE availability ADD COLUMN IF NOT EXISTS booked_at TIMESTAMPTZ;")
+    cur.execute("ALTER TABLE availability ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();")
+    cur.execute("ALTER TABLE availability ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();")
+
+    # Backfill old rows just in case
+    cur.execute("UPDATE availability SET status = 'available' WHERE status IS NULL;")
+
+    # Indexes
     cur.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_availability_date
@@ -113,6 +132,7 @@ def init_db():
         """
     )
 
+    # Trigger
     cur.execute(
         """
         CREATE OR REPLACE FUNCTION set_updated_at()
@@ -140,7 +160,6 @@ def init_db():
     cur.close()
     conn.close()
     logging.info("Database initialized.")
-
 
 # =========================
 # HELPERS
