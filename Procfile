@@ -1,1 +1,1 @@
-worker: python chatters.py
+worker: python main.py
